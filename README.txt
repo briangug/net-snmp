@@ -14,7 +14,7 @@ This gem is a wrapper around the Net-SNMP library.  It supports SNMP versions 1,
 
   require 'net_snmp'
   
-  manager = NetSNMP::Manager.new(:host => "localhost", :version => :SNMPv1; :community => "public", :timeout => 3)
+  manager = NetSNMP::Manager.new(:host => "localhost", :version => :SNMPv1, :community => "public", :timeout => 3)
   response = manager.get("1.3.6.1.2.1.1.1.0")
   if response.error_status == NetSNMP::SUCCESS
     response.each_varbind {|vb| puts "#{vb.name}: #{vb.value}"}

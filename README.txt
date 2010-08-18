@@ -5,6 +5,7 @@
 == DESCRIPTION
 
 This gem is a wrapper around the Net-SNMP library.  It supports SNMP versions 1, 2c, and 3.
+The API is based on the pure Ruby implementation of libSNMP by David R. Halliday (http://snmplib.rubyforge.org/).
 
 == FEATURES/PROBLEMS:
 

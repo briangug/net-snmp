@@ -1,0 +1,6 @@
+.rvmrc
+ext/netsnmp_api/Makefile
+ext/netsnmp_api/conftest.dSYM/
+ext/netsnmp_api/netsnmp_api.bundle
+ext/netsnmp_api/rubynetsnmp.o
+test/snmpd.log

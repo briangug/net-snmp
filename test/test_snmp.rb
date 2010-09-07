@@ -1,3 +1,6 @@
+# Include netsnmp_api extension on the load path
+$LOAD_PATH.unshift File.dirname(__FILE__) + "/../ext/netsnmp_api"
+
 require "test/unit"
 require "net_snmp"
 

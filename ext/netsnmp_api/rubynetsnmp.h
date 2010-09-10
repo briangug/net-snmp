@@ -30,9 +30,18 @@ typedef CRITICAL_SECTION rubynetsnmp_mutex;
 typedef unsigned char BOOL;
 #endif
 
+#ifndef MAX_WRAP_ARGUMENTS
+#define MAX_WRAP_ARGUMENTS 8
+#endif
+typedef struct {
+  int argc;
+  void *args[MAX_WRAP_ARGUMENTS];
+  void *func_ptr;
+} FUNCTION_WRAPPER;
+
 typedef struct {
 	int code;
-	char *description;
+	const char *description;
 } NETSNMP_ERROR_TABLE;
 
 NETSNMP_ERROR_TABLE netsnmp_error_table[] = {
@@ -52,11 +61,11 @@ typedef struct _ruby_net_snmp {
 	char *context;
 	u_char *securityEngineID;
 	int securityLevel;
-    struct snmp_session session, *ss;
-    struct snmp_pdu *pdu;
-    struct snmp_pdu *response;
-    struct variable_list *vars;
-    int status;
+  struct snmp_session session, *ss;
+  struct snmp_pdu *pdu;
+  struct snmp_pdu *response;
+  struct variable_list *vars;
+  int status;
 	char *authPassPhrase;
 	char *privPassPhrase;
 } ruby_net_snmp;
@@ -82,7 +91,7 @@ EXPORT_FUNC VALUE rubynetsnmp_set_persistent_directory(VALUE self, VALUE vPersis
 void _initialize_netsnmp_lib(void);
 int process_oid(VALUE rubyOID, oid *theOID, size_t *theOIDlen);
 int process_noids(VALUE ruby_oids, struct snmp_pdu *pdu, VALUE setVals, BOOL isSet);
-void raise_exception(VALUE exceptionType, char *format, ...);
+void raise_exception(VALUE exceptionType, const char *format, ...);
 void rubynetsnmp_raise_exception(int rc);
 void print_oid(const char *label, VALUE oid);
 BOOL check_for_multi(VALUE oids);
@@ -101,6 +110,15 @@ char *rubynetsnmp_string_value(VALUE setVals, int pos);
 float rubynetsnmp_float_value(VALUE setVals, int pos);
 VALUE unwrap_varbind(VALUE setVal);
 VALUE ruby_class_from(VALUE instance);
+
+/* Here we include support for rb_thread_blocking_function to release the GIL while the
+   SNMP call is made. */
+#ifdef HAVE_TBR
+/* Used to create a wrapper for calling rb_thread_blocking_function */
+void *gil_release_and_call(int count, ...);
+/* Used with rb_thread_blocking_function */
+static void *invoke_function(void *);
+#endif
 
 #ifdef _NETSNMP_DEBUG
 void dump_config(ruby_net_snmp *netsnmp);

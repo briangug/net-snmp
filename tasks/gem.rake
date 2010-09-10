@@ -6,10 +6,10 @@ end
 require 'hoe'
 
 HOE = Hoe.spec 'net-snmp' do
-  self.rubyforge_name = 'net-snmp'
+#  self.rubyforge_name = 'net-snmp'
   self.author         = ['Brian Gugliemetti']
   self.email          = %w[briang@spiceworks.com]
-  self.version        = "0.2.0"
+  self.version        = "0.2.1"
   self.need_tar       = false
   self.need_zip       = false
   

@@ -67,6 +67,7 @@ void _initialize_netsnmp_lib(void) {
 	if (!netsnmp_initialized) {
 		netsnmp_initialized = TRUE;
 		
+		SOCK_STARTUP;
 		logh = netsnmp_register_loghandler(NETSNMP_LOGHANDLER_STDERR, log_level);
 	    if (logh) {
 	        logh->pri_max = LOG_EMERG;
@@ -98,15 +99,13 @@ EXPORT_FUNC void rubynetsnmp_free(ruby_net_snmp *netsnmp) {
 	if (netsnmp->securityEngineID) { free(netsnmp->securityEngineID); }
 	if (netsnmp->context) { free(netsnmp->context); }
 	if (netsnmp->contextEngineID) { free(netsnmp->contextEngineID); }
-	if (netsnmp->ss) { snmp_close(netsnmp->ss); }
+	if (netsnmp->ss) { snmp_sess_close(netsnmp->ss); }
 	free(netsnmp);
 
 #ifdef _NETSNMP_DEBUG
 	printf("netsnmp_free called\n");
 	fflush(stdout);
 #endif
-	
-	SOCK_CLEANUP;
 }
 
 EXPORT_FUNC VALUE rubynetsnmp_allocate(VALUE klass) {
@@ -128,7 +127,7 @@ EXPORT_FUNC VALUE rubynetsnmp_close(VALUE self) {
 	Data_Get_Struct(self, ruby_net_snmp, netsnmp);
 	
 	if (netsnmp->ss) {
-		snmp_close(netsnmp->ss);
+		snmp_sess_close(netsnmp->ss);
 		netsnmp->ss = (struct snmp_session *) NULL;
 	}
 	
@@ -203,8 +202,8 @@ EXPORT_FUNC VALUE rubynetsnmp_initialize(VALUE self, VALUE hashOptions) {
 	VALUE vRetries = hash_value_for_symbol(hashOptions, "retries");
 	VALUE vValue;
 
-	char *host = "127.0.0.1";
-	char *community = "public";
+	char *host = (char *)"127.0.0.1";
+	char *community = (char *)"public";
 	int sessionVersion = SNMP_VERSION_2c;  /* Default to 2c */
 	ID passedVersion = rb_intern("SNMPv2c");
 	int retries = 1;
@@ -444,9 +443,7 @@ EXPORT_FUNC VALUE rubynetsnmp_initialize(VALUE self, VALUE hashOptions) {
 	dump_config(netsnmp);
 #endif
 
-	SOCK_STARTUP;
-	
-	netsnmp->ss = snmp_open(&netsnmp->session);
+	netsnmp->ss = snmp_sess_open(&netsnmp->session);
 	if (!netsnmp->ss) {
 		rb_raise(eNetSNMPException, "Error creating SNMP session.");
 	}
@@ -534,11 +531,15 @@ EXPORT_FUNC VALUE rubynetsnmp_get_next(VALUE self, VALUE vOid) {
 	pdu = snmp_pdu_create(SNMP_MSG_GETNEXT);
 
 	if (!(rc = process_noids(vOid, pdu, Qnil, FALSE))) {
-		status = snmp_synch_response(netsnmp->ss, pdu, &response);
+#ifdef HAVE_TBR
+    status = (int) gil_release_and_call(3, snmp_sess_synch_response, RUBY_UBF_IO, netsnmp->ss, pdu, &response);
+#else
+		status = snmp_sess_synch_response(netsnmp->ss, pdu, &response);
+#endif
 #if _NETSNMP_DEBUG > 1
 		printf("netsnmp_get_next: snmp_sync_response rc=%d\n", status);
-#endif
 		fflush(stdout);
+#endif
 		if (status == STAT_SUCCESS && response) {
 			vVarbind = ruby_varbind_list(response);
 		}
@@ -548,7 +549,7 @@ EXPORT_FUNC VALUE rubynetsnmp_get_next(VALUE self, VALUE vOid) {
 				return Qnil;
 			}
 			else {
-				snmp_error(netsnmp->ss, NULL, NULL, &err);
+				snmp_sess_error(netsnmp->ss, NULL, NULL, &err);
 				errString = rb_str_new2(err);
 				SNMP_FREE(err);
 				rb_raise(eNetSNMPException, StringValuePtr(errString));
@@ -607,10 +608,15 @@ EXPORT_FUNC VALUE rubynetsnmp_get_bulk(int argc, VALUE *argv, VALUE self) {
 	
 	Data_Get_Struct(self, ruby_net_snmp, netsnmp);
 	
-	if (argc < 1) {
-		rb_raise(rb_eArgError, "Invalid number of arguments");
-		return Qnil;
-	}
+  if (argc < 1) {
+    rb_raise(rb_eArgError, "Invalid number of arguments");
+    return Qnil;
+  }
+	
+  if (netsnmp->session.version == SNMP_VERSION_1) {
+    rb_raise(eNetSNMPException, "get_bulk is only valid for SNMP version v2c and above.");
+    return Qnil;
+  }
 	
 	if (argc == 2) {
 		vOptions = argv[1];
@@ -631,7 +637,11 @@ EXPORT_FUNC VALUE rubynetsnmp_get_bulk(int argc, VALUE *argv, VALUE self) {
 	pdu->non_repeaters = non_repeaters;
 	pdu->max_repetitions = max_repetitions;
 	if (!(rc = process_noids(vOid, pdu, Qnil, FALSE))) {
-		rc = snmp_synch_response(netsnmp->ss, pdu, &response);
+#ifdef HAVE_TBR
+    rc = (int) gil_release_and_call(3, snmp_sess_synch_response, RUBY_UBF_IO, netsnmp->ss, pdu, &response);
+#else
+		rc = snmp_sess_synch_response(netsnmp->ss, pdu, &response);
+#endif
 		if (rc == STAT_SUCCESS) {
 			if (response) {
 				vVarbind = ruby_varbind_list(response);
@@ -646,6 +656,9 @@ EXPORT_FUNC VALUE rubynetsnmp_get_bulk(int argc, VALUE *argv, VALUE self) {
 				vArgv[2] = INT2FIX(SNMP_ERR_GENERR);
 			}
 			rb_obj_call_init(vResult, 3, vArgv);
+		}
+		else if (STAT_TIMEOUT == rc) {
+			raise_exception(eReqTimeoutException, "Host %s is not responding.", netsnmp->host);
 		}
 		else {
 			/* ERROR */
@@ -717,7 +730,11 @@ EXPORT_FUNC VALUE rubynetsnmp_set(int argc, VALUE *argv, VALUE self) {
 	
 	pdu = snmp_pdu_create(SNMP_MSG_SET);
 	if (!(rc = process_noids(vOid, pdu, val, TRUE))) {
-		rc = snmp_synch_response(netsnmp->ss, pdu, &response);
+#ifdef HAVE_TBR
+    rc = (int) gil_release_and_call(3, snmp_sess_synch_response, RUBY_UBF_IO, netsnmp->ss, pdu, &response);
+#else
+		rc = snmp_sess_synch_response(netsnmp->ss, pdu, &response);
+#endif
 		if (rc == STAT_SUCCESS) {
 			if (response) {
 				vVarbind = ruby_varbind_list(response);
@@ -1297,7 +1314,7 @@ VALUE ruby_sprintf(char *format, ...) {
 	return (rb_str_new(msg, strlen(msg)));
 }
 
-void raise_exception(VALUE exceptionType, char *format, ...) {
+void raise_exception(VALUE exceptionType, const char *format, ...) {
 	va_list ap;
 	char msg[1024] = "\0";
 	VALUE v;
@@ -1378,14 +1395,19 @@ struct snmp_pdu *internal_netsnmp_get(VALUE self, VALUE vOid) {
 	Data_Get_Struct(self, ruby_net_snmp, netsnmp);
 	pdu = snmp_pdu_create(SNMP_MSG_GET);
 	if (!(status = process_noids(vOid, pdu, Qnil, FALSE))) {
-		status = snmp_synch_response(netsnmp->ss, pdu, &response);
+	  
+#ifdef HAVE_TBR
+    status = (int) gil_release_and_call(3, snmp_sess_synch_response, RUBY_UBF_IO, netsnmp->ss, pdu, &response);
+#else
+		status = snmp_sess_synch_response(netsnmp->ss, pdu, &response);
+#endif
 	
 		if (status != STAT_SUCCESS) {
 			if (STAT_TIMEOUT == status) {
 				raise_exception(eReqTimeoutException, "Host %s is not responding.", netsnmp->host);
 			}
 			else {
-				snmp_error(netsnmp->ss, NULL, NULL, &err);
+				snmp_sess_error(netsnmp->ss, NULL, NULL, &err);
 				errString = rb_str_new2(err);
 				SNMP_FREE(err);
 				rb_raise(eNetSNMPException, StringValuePtr(errString));
@@ -1413,7 +1435,7 @@ void rubynetsnmp_raise_exception(int rc) {
 			break;
 		}
 	}
-	
+  fprintf(stderr, "raise exception, rc=%d\n", rc);
 	rb_raise(eNetSNMPException, err_txt);
 }
 
@@ -1452,6 +1474,111 @@ void print_oid(const char *label, VALUE vOid) {
 	}
 	fflush(stdout);
 }
+
+#ifdef HAVE_TBR
+/* 
+  argc - Number of parameters provided to pass to function
+  void *func_ptr - Function pointer of function to invoke
+  void *interrupt_func_ptr - Function pointer of interrupt function
+  void *func_arg x argc
+*/
+void *gil_release_and_call(int argc, ...) {
+  va_list vargs;
+  int i;
+  FUNCTION_WRAPPER func_wrapper;
+  void *interrupt_func_ptr;
+  
+  va_start(vargs, argc);
+  func_wrapper.func_ptr = va_arg(vargs, void *);
+  interrupt_func_ptr = va_arg(vargs, void *);
+  func_wrapper.argc = argc;
+  
+  for (i = 0; i < argc && i < MAX_WRAP_ARGUMENTS; i++) {
+    void *arg = va_arg(vargs, void *);
+    func_wrapper.args[i] = arg;
+  }
+  va_end(vargs);
+
+  return((void *)rb_thread_blocking_region((rb_blocking_function_t *)invoke_function, (void *)&func_wrapper, interrupt_func_ptr, 0));
+}
+
+static void *invoke_function(void *fwrapper) {
+  FUNCTION_WRAPPER *func_wrapper = fwrapper;
+  void *result = (void *)NULL;
+  
+#if _NETSNMP_DEBUG > 127
+  printf("invoke_function reached.\n");
+  printf("\tNumber of arguments: %d\n", func_wrapper->argc);
+#endif
+  switch (func_wrapper->argc) {
+    case 0:
+      {
+        void *(*func_ptr)(void) = func_wrapper->func_ptr;
+        result = func_ptr();
+      }
+      break;
+    case 1:
+      {
+        void *(*func_ptr)(void *) = func_wrapper->func_ptr;
+        result = func_ptr(func_wrapper->args[0]);
+      }
+      break;
+    case 2:
+      {
+        void *(*func_ptr)(void *, void *) = func_wrapper->func_ptr;
+        result = func_ptr(func_wrapper->args[0], func_wrapper->args[1]);
+      }
+      break;
+    case 3:
+      {
+        void *(*func_ptr)(void *, void *, void *) = func_wrapper->func_ptr;
+        result = func_ptr(func_wrapper->args[0], func_wrapper->args[1], func_wrapper->args[2]);
+      }
+      break;
+    case 4:
+      {
+        void *(*func_ptr)(void *, void *, void *, void *) = func_wrapper->func_ptr;
+        result = func_ptr(func_wrapper->args[0], func_wrapper->args[1], func_wrapper->args[2], func_wrapper->args[3]);
+      }
+      break;
+    case 5:
+      {
+        void *(*func_ptr)(void *, void *, void *, void *, void *) = func_wrapper->func_ptr;
+        result = func_ptr(func_wrapper->args[0], func_wrapper->args[1], func_wrapper->args[2], 
+                          func_wrapper->args[3], func_wrapper->args[4]);
+      }
+      break;
+    case 6:
+      {
+        void *(*func_ptr)(void *, void *, void *, void *, void *, void *) = func_wrapper->func_ptr;
+        result = func_ptr(func_wrapper->args[0], func_wrapper->args[1], func_wrapper->args[2],
+                          func_wrapper->args[3], func_wrapper->args[4], func_wrapper->args[5]);
+      }
+      break;
+    case 7:
+      {
+        void *(*func_ptr)(void *, void *, void *, void *, void *, void *, void *) = func_wrapper->func_ptr;
+        result = func_ptr(func_wrapper->args[0], func_wrapper->args[1], func_wrapper->args[2],
+                          func_wrapper->args[3], func_wrapper->args[4], func_wrapper->args[5],
+                          func_wrapper->args[6]);
+      }
+      break;
+    case 8:
+      {
+        void *(*func_ptr)(void *, void *, void *, void *, void *, void *, void *, void *) = func_wrapper->func_ptr;
+        result = func_ptr(func_wrapper->args[0], func_wrapper->args[1], func_wrapper->args[2], 
+                          func_wrapper->args[3], func_wrapper->args[4], func_wrapper->args[5],
+                          func_wrapper->args[6], func_wrapper->args[7]);
+      }
+      break;
+    default:
+      fprintf(stderr, "Unsupported number of arguments.\n");
+      break;
+  }
+  
+  return(result);
+}
+#endif
 
 #ifdef _WIN32
 BOOL APIENTRY DllMain(HANDLE hModule, 

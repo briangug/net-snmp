@@ -10,3 +10,7 @@ Only SNMP GETs are implemented.  SETs to come soon.
 
 Added support for set and get_bulk operations.  Also made sure the gem compiles under Ruby 1.9.1
 
+=== 0.2.1 / 2010-09-10
+
+* Release Ruby GIL when invoking NetSNMP library calls.  Also includes some bugfixes.
+

@@ -1435,7 +1435,6 @@ void rubynetsnmp_raise_exception(int rc) {
 			break;
 		}
 	}
-  fprintf(stderr, "raise exception, rc=%d\n", rc);
 	rb_raise(eNetSNMPException, err_txt);
 }
 

@@ -1424,7 +1424,7 @@ struct snmp_pdu *internal_netsnmp_get(VALUE self, VALUE vOid) {
 /* Raises an exception using an NETSNMP return code */
 void rubynetsnmp_raise_exception(int rc) {
 	int i;
-	char *err_txt = "internal error";
+	const char *err_txt = "internal error";
 	
 	for(i = 0; netsnmp_error_table[i].description; i++) {
 		if (netsnmp_error_table[i].code == rc) {

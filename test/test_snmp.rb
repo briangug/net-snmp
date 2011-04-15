@@ -1,6 +1,3 @@
-# Include netsnmp_api extension on the load path
-$LOAD_PATH.unshift File.dirname(__FILE__) + "/../ext/netsnmp_api"
-
 require "test/unit"
 require "net_snmp"
 
@@ -128,4 +125,15 @@ class TestNetsnmp < Test::Unit::TestCase
     assert_equal 1, response.varbind_list.length
   end
   
+  def test_integer_compare
+    i = Integer(5)
+    snmp_int = NetSNMP::Integer.new(5)
+    assert_equal i, snmp_int
+  end
+  
+  def test_float_compare
+    f = Float(3.14159)
+    snmp_float = NetSNMP::Float.new(3.14159)
+    assert_equal f, snmp_float
+  end
 end

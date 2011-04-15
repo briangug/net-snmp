@@ -119,6 +119,7 @@ module NetSNMP
   
   class Integer64
     attr_accessor :value
+    include Comparable
     
     ASN_TYPE = 0x4a
     
@@ -128,6 +129,10 @@ module NetSNMP
     
     def initialize(val)
       @value = val
+    end
+    
+    def <=>(other)
+      @value <=> other.to_i
     end
     
     def to_i
@@ -157,6 +162,7 @@ module NetSNMP
   
   class Float
     attr_accessor :value
+    include Comparable
     
     ASN_TYPE = 0x48
     
@@ -168,6 +174,10 @@ module NetSNMP
       @value = val.to_f
     end
 
+    def <=>(other)
+      @value <=> other.to_f
+    end
+    
     def to_i
       @value.to_i
     end

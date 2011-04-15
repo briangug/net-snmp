@@ -46,6 +46,8 @@ module NetSNMP
   end
 
   class Integer
+    include Comparable
+    
     ASN_TYPE = 0x02
     
     def initialize(val)
@@ -54,6 +56,10 @@ module NetSNMP
     
     def asn1_type
       "Integer"
+    end
+    
+    def <=>(other)
+        @value <=> other.to_i
     end
     
     def to_i
@@ -105,7 +111,7 @@ module NetSNMP
       parsed = ""
       pieces = ip.split(".")
       if pieces.length == 4
-        pieces.each { |p| parsed << p.chr }
+        pieces.each { |p| parsed << p.to_i }
       end
       parsed
     end
@@ -297,14 +303,16 @@ module NetSNMP
       hours, remainder = remainder.divmod(360000)
       minutes, remainder = remainder.divmod(6000)
       seconds, hundredths = remainder.divmod(100)
+      v = ""
       case
         when days < 1
-          sprintf('%02d:%02d:%02d.%02d', hours, minutes, seconds, hundredths)
+          v = sprintf('%02d:%02d:%02d.%02d', hours, minutes, seconds, hundredths)
         when days == 1
-          sprintf('1 day, %02d:%02d:%02d.%02d', hours, minutes, seconds, hundredths)
+          v = sprintf('1 day, %02d:%02d:%02d.%02d', hours, minutes, seconds, hundredths)
         when days > 1
-          sprintf('%d days, %02d:%02d:%02d.%02d', days, hours, minutes, seconds, hundredths)
+          v = sprintf('%d days, %02d:%02d:%02d.%02d', days, hours, minutes, seconds, hundredths)
       end
+      "(#{@value}) #{v}"
     end
     
   end #TimeTicks
